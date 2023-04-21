@@ -1,5 +1,5 @@
 ---
-title: "p8106_HW4_qz3366"
+title: "p8106_HW4_qz2266"
 author: "Qing Zhou"
 date: "2023-04-20"
 output: pdf_document
