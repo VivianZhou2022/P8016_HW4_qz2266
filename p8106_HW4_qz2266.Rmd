@@ -15,7 +15,7 @@ library(ranger)
 library(gbm)
 library(ISLR) 
 
-# General setting for plots and themes
+# general setting for plots and themes
 knitr::opts_chunk$set(warning = FALSE, message = FALSE, 
                       fig.align = "center", cache = TRUE, 
                       fig.width = 6, fig.asp = 0.6, out.width = "90%")
@@ -41,7 +41,7 @@ News and World Report. The response variable is the out-of-state tuition
 (Outstate). 
 
 ```{r import}
-# Data Import
+# data import
 college_df = 
   read.csv("data/College.csv") %>% 
   na.omit() %>% 
@@ -54,16 +54,26 @@ Partition the dataset into two parts: training data (80%) and test data (20%).
 
 ```{r split}
 set.seed(1)
+# data partition
 trainRows <- createDataPartition(y = college_df$outstate, p = 0.8, list = FALSE)
 
-# Training data
+# training data
 college_train = college_df[trainRows, ]
 
-# Testing data
+# testing data
 college_test = college_df[-trainRows, ]
 
-# create a cross-validation object
+# create cross-validation objects
 ctrl1 <- trainControl(method = "cv")
+# for classification tree under the minimal MSE rule
+ctrl2 <- trainControl(method = "cv",
+                      classProbs = TRUE,
+                      summaryFunction = twoClassSummary)
+# for classification tree under the 1SE rule
+ctrl3 <- trainControl(method = "cv",
+                      classProbs = TRUE,
+                      summaryFunction = twoClassSummary,
+                      selectionFunction = "oneSE")
 
 ```
 
@@ -130,10 +140,10 @@ rf.perm = ranger(outstate ~ .,
                       min.node.size = rf.fit$bestTune[[3]],
                       importance = "permutation",
                       scale.permutation.importance = TRUE)
-# Report variable importance
+# report variable importance
 barplot(sort(ranger::importance(rf.perm), decreasing = FALSE), 
         las = 2, horiz = TRUE, cex.names = 0.7, 
-        col = colorRampPalette(colors = c("cyan", "blue"))(16))
+        col = colorRampPalette(colors = c("cyan", "blue"))(19))
 
 # variable importance using impurity methods
 set.seed(1)
@@ -143,18 +153,167 @@ rf.impu <- ranger(outstate ~ .,
                         splitrule = "variance",
                         min.node.size = rf.fit$bestTune[[3]],
                         importance = "impurity")
-# Report variable importance
+# report variable importance
 barplot(sort(ranger::importance(rf.impu), decreasing = FALSE),
         las = 2, horiz = TRUE, cex.names = 0.7,
-        col = colorRampPalette(colors = c("cyan", "blue"))(16))
+        col = colorRampPalette(colors = c("cyan", "blue"))(19))
 ```
 
-- The model indicated that the variables expend and room_board had the highest predictive power and their values were the most significant in determining the out-of-state tuition cost (Outstate). This suggests that these variables play a crucial role in influencing the Outstate cost.
+- Calculate and graph variable importance using permutation and impurity metrics.
+
+- The model indicated that the variables `expend` and `room-board` had the highest predictive power and their values were the most significant in determining the out-of-state tuition cost (outstate). This suggests that these variables play a crucial role in influencing the outstate tuition.
 
 ```{r, warning=FALSE}
-# Test error
+# test error
 pred.rf <- predict(rf.fit, newdata = college_test)
 RMSE(pred.rf, college_test$outstate)
 ```
 
 - The test error of the model is 1651.307
+
+## (c) Boosting
+
+Perform boosting on the training data. Report the variable importance and the test
+error.
+
+```{r, warning=FALSE}
+# train model using gbm with grid of tuning parameters
+bst.grid = expand.grid(n.trees = c(2000,3000,4000,5000),
+                        interaction.depth = 1:5,
+                        shrinkage = c(0.001,0.003,0.005),
+                        n.minobsinnode = c(1,10))
+
+set.seed(1)
+bst.fit <- train(outstate ~.,
+                 data = college_train,
+                 method = "gbm",
+                 tuneGrid = bst.grid,
+                 trControl = ctrl1,
+                 verbose = FALSE)
+
+ggplot(bst.fit, highlight = TRUE)
+bst.fit$bestTune
+```
+
+We use the gradient boosting method implemented with gbm in caret package.
+
+```{r, warning=FALSE}
+# variable importance
+summary(bst.fit$finalModel, las = 2, cBars = 19, cex.names = 0.6)
+
+# test error
+pred.bst <- predict(bst.fit, newdata = college_test)
+RMSE(pred.bst, college_test$outstate)
+```
+
+- The most important variables for gradient boosting are still `expend` and `room_board`. Other important variables include `grad_rate` and `terminal`. The test error for boosting is 1620.551,  smaller than the test error for random forest.
+
+
+# Question 2
+
+This problem involves the OJ data in the ISLR package. The data contains 1070
+purchases where the customers either purchased Citrus Hill or Minute Maid Orange Juice.
+A number of characteristics of customers and products are recorded.
+
+## Data preparation
+
+```{r}
+# data import
+OJ = 
+  OJ %>% 
+  na.omit() %>% 
+  janitor::clean_names() 
+OJ$purchase <- factor(OJ$purchase, c("CH", "MM"))   
+```
+
+Create a training set containing a random sample of 700 observations, and a test set containing the remaining
+observations.
+
+```{r}
+set.seed(1)
+# data partition
+trainRows2 <- createDataPartition(OJ$purchase,
+                              p = (699/1070),
+                              list = F)
+```
+
+## (a) Classification Tree
+
+Build a classification tree using the training data, with Purchase as the response
+and the other variables as predictors.
+
+```{r, warning=FALSE}
+# classification selected by min MSE rule using CART
+set.seed(1)
+
+rpart.fit2 = train(purchase ~ . , 
+                   OJ,
+                   subset = trainRows2, 
+                   method = "rpart",
+                   tuneGrid = data.frame(cp = exp(seq(-6,-4,len = 100))),
+                   trControl = ctrl2,
+                   metric = "ROC")
+
+rpart.plot(rpart.fit2$finalModel)
+rpart.fit2$bestTune$cp # report the best cp value
+```
+
+```{r}
+# classification tree selected by 1SE rule
+set.seed(1)
+
+rpart.fit2.1se = train(purchase ~ . , 
+                   OJ,
+                   subset = trainRows2, 
+                   method = "rpart",
+                   tuneGrid = data.frame(cp = exp(seq(-6,-4,len = 100))),
+                   trControl = ctrl3,
+                   metric = "ROC")
+
+rpart.plot(rpart.fit2.1se$finalModel)
+rpart.fit2.1se$bestTune$cp # report the best cp value
+```
+
+- We use rpart to build classification tree to predict the outcome `purchase`. The tree size with the lowest cross-validation error is 10 with 9 splits. It's DIFFERENT from the tree size obtained using 1SE rule, which is 4 with 3 splits. The latter is smaller.  
+
+- The tree with the lowest cross-validation error has cp = 0.00602938, while the tree obtained using the 1 SE rule has cp = 0.01831564.
+
+
+
+## (b) Boosting
+
+Perform boosting on the training data and report the variable importance and
+the test error rate.
+
+```{r, warning=FALSE}
+set.seed(1)
+
+gbm2.grid <- expand.grid(n.trees = c(2000,3000,4000,5000),
+                         interaction.depth = 1:6,
+                         shrinkage = c(0.0005,0.001,0.002),
+                         n.minobsinnode = 1)
+
+gbm2.fit <- train(purchase ~.,
+                  OJ,
+                  subset = trainRows2,
+                  tuneGrid = gbm2.grid,
+                  trControl = ctrl2,
+                  method = "gbm",
+                  distribution = "adaboost",
+                  metric = "ROC",
+                  verbose = FALSE)
+
+ggplot(gbm2.fit, highlight = TRUE)
+# variance importance
+summary(gbm2.fit$finalModel, las = 2, cBars = 16, cex.names = 0.6)
+```
+
+```{r, warning=FALSE}
+# test error rate
+pred.gbm2 = predict(gbm2.fit, newdata = OJ[-trainRows2,])
+test.err.rate = mean(pred.gbm2 != OJ$purchase[-trainRows2])*100;
+test.err.rate
+```
+
+- The most important predictor is `loyal_ch`, followed `price_diff`. The test error rate is 19.73%.
+
